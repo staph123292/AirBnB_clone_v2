@@ -11,6 +11,7 @@ from models.place import Place
 from models.state import State
 from models.review import Review
 from models.user import User
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 name2class = {
@@ -20,78 +21,62 @@ name2class = {
     'State': State,
     'Review': Review,
     'User': User
-}
-
-
 class DBStorage:
-    """Database Storage"""
     __engine = None
     __session = None
 
     def __init__(self):
-        """Initializes the object"""
-        user = os.getenv('HBNB_MYSQL_USER')
-        passwd = os.getenv('HBNB_MYSQL_PWD')
-        host = os.getenv('HBNB_MYSQL_HOST')
-        database = os.getenv('HBNB_MYSQL_DB')
-        self.__engine = create_engine('mysql+mysqldb://{}:{}@{}/{}'
-                                      .format(user, passwd, host, database))
+        """Initialize DBStorage instance."""
+        self.__engine = create_engine(
+            'mysql+mysqldb://{}:{}@{}/{}'.
+            format(os.getenv('HBNB_MYSQL_USER'),
+                   os.getenv('HBNB_MYSQL_PWD'),
+                   os.getenv('HBNB_MYSQL_HOST'),
+                   os.getenv('HBNB_MYSQL_DB')),
+            pool_pre_ping=True)
+        
         if os.getenv('HBNB_ENV') == 'test':
             Base.metadata.drop_all(self.__engine)
 
     def all(self, cls=None):
-        """returns a dictionary of all the objects present"""
-        if not self.__session:
-            self.reload()
+        """Query on the current database session."""
+        from models import classes_dict
+        
         objects = {}
-        if type(cls) == str:
-            cls = name2class.get(cls, None)
         if cls:
-            for obj in self.__session.query(cls):
-                objects[obj.__class__.__name__ + '.' + obj.id] = obj
+            query = self.__session.query(classes_dict[cls])
+            for obj in query.all():
+                key = "{}.{}".format(cls, obj.id)
+                objects[key] = obj
         else:
-            for cls in name2class.values():
-                for obj in self.__session.query(cls):
-                    objects[obj.__class__.__name__ + '.' + obj.id] = obj
+            for cls in classes_dict.values():
+                query = self.__session.query(cls)
+                for obj in query.all():
+                    key = "{}.{}".format(cls.__name__, obj.id)
+                    objects[key] = obj
         return objects
 
-    def reload(self):
-        """reloads objects from the database"""
-        session_factory = sessionmaker(bind=self.__engine,
-                                       expire_on_commit=False)
-        Base.metadata.create_all(self.__engine)
-        self.__session = scoped_session(session_factory)
-
     def new(self, obj):
-        """creates a new object"""
+        """Add the object to the current database session."""
         self.__session.add(obj)
 
     def save(self):
-        """saves the current session"""
+        """Commit all changes of the current database session."""
         self.__session.commit()
 
     def delete(self, obj=None):
-        """deletes an object"""
-        if not self.__session:
-            self.reload()
+        """Delete from the current database session."""
         if obj:
             self.__session.delete(obj)
 
-    def close(self):
-        """Dispose of current session if active"""
-        self.__session.remove()
+    def reload(self):
+        """Create all tables and create a new session."""
+        Base.metadata.create_all(self.__engine)
+        Session = scoped_session(sessionmaker(bind=self.__engine,
+                                              expire_on_commit=False))
+        self.__session = Session()
 
-    def get(self, cls, id):
-        """Retrieve an object"""
-        if cls is not None and type(cls) is str and id is not None and\
-           type(id) is str and cls in name2class:
-            cls = name2class[cls]
-            result = self.__session.query(cls).filter(cls.id == id).first()
-            return result
-        else:
-            return None
-
-    def count(self, cls=None):
+def count(self, cls=None):
         """Count number of objects in storage"""
         total = 0
         if type(cls) == str and cls in name2class:
